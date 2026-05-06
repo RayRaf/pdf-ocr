@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block title %}{{ doc.title }} — Результат OCR{% endblock %}
+
+{% block content %}
+
+<div class="card">
+    <a href="{% url 'ocr:index' %}" class="btn btn-primary">← Назад к списку</a>
+</div>
+
+<div class="card">
+    <h2>📄 {{ doc.title }}</h2>
+    <p>
+        Статус: <span class="status status-{{ doc.status }}">{{ doc.get_status_display }}</span>
+        <span style="color:#999; margin-left:15px;">
+            {{ doc.created_at|date:"d.m.Y H:i" }}
+        </span>
+    </p>
+</div>
+
+{% if doc.status == "done" %}
+    <div class="card">
+        <h2>📝 Извлечённый текст</h2>
+        <div class="text-preview">{{ doc.extracted_text }}</div>
+    </div>
+{% elif doc.status == "error" %}
+    <div class="card">
+        <div class="alert alert-error">
+            ❌ Ошибка: {{ doc.error_message }}
+        </div>
+        <button class="btn btn-success" onclick="retryProcess()">🔄 Повторить обработку</button>
+    </div>
+{% else %}
+    <div class="card">
+        <p style="color:#999;">Документ ещё не обработан.</p>
+        <button class="btn btn-success" onclick="startProcess()">🔍 Обработать</button>
+    </div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+
+async function startProcess() {
+    const btn = document.querySelector('button[onclick="startProcess()"]');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span> Обработка...';
+    }
+
+    try {
+        const response = await fetch('/process/{{ doc.id }}/', {
+            method: 'POST',
+            headers: { 'X-CSRFToken': getCookie('csrftoken') }
+        });
+        if (response.ok) {
+            location.reload();
+        } else {
+            const data = await response.json();
+            alert(data.error || 'Ошибка');
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = '🔍 Обработать';
+            }
+        }
+    } catch (err) {
+        alert(err.message);
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '🔍 Обработать';
+        }
+    }
+}
+
+async function retryProcess() {
+    const btn = document.querySelector('button[onclick="retryProcess()"]');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span> Повтор...';
+    }
+
+    try {
+        const response = await fetch('/process/{{ doc.id }}/', {
+            method: 'POST',
+            headers: { 'X-CSRFToken': getCookie('csrftoken') }
+        });
+        if (response.ok) {
+            location.reload();
+        } else {
+            const data = await response.json();
+            alert(data.error || 'Ошибка');
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = '🔄 Повторить обработку';
+            }
+        }
+    } catch (err) {
+        alert(err.message);
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '🔄 Повторить обработку';
+        }
+    }
+}
+</script>
+{% endblock %}
