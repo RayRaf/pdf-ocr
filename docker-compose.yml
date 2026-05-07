@@ -50,6 +50,8 @@ services:
   redis:
     image: redis:7-alpine
     container_name: pdf_ocr_redis
+    networks:
+      - app_network
     restart: unless-stopped
 
 networks:
