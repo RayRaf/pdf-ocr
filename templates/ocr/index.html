@@ -108,19 +108,24 @@ td.actions {
                         </td>
                         <td class="col-date">{{ doc.created_at|date:"d.m.Y H:i" }}</td>
                         <td class="actions">
-                            {% if doc.status == "pending" or doc.status == "error" %}
-                                <button class="btn btn-success process-btn"
-                                        data-id="{{ doc.id }}"
-                                        onclick="processDoc({{ doc.id }})">
-                                    🔍 Обработать
-                                </button>
-                            {% elif doc.status == "done" %}
+                            {% if doc.status == "done" %}
                                 <a href="{% url 'ocr:detail' doc.id %}" class="btn btn-primary">
                                     📖 Читать
                                 </a>
                             {% else %}
-                                <button class="btn" disabled>
-                                    <span class="spinner"></span> Обработка...
+                                <button
+                                    class="btn {% if doc.status == 'pending' or doc.status == 'error' %}btn-success process-btn{% endif %}"
+                                    data-id="{{ doc.id }}"
+                                    id="btn-{{ doc.id }}"
+                                    {% if doc.status == "processing" %}disabled{% endif %}
+                                    onclick="processDoc({{ doc.id }})">
+                                    {% if doc.status == "processing" %}
+                                        <span class="spinner"></span> Обработка...
+                                    {% elif doc.status == "error" %}
+                                        🔍 Повторить
+                                    {% else %}
+                                        🔍 Обработать
+                                    {% endif %}
                                 </button>
                             {% endif %}
                             <button class="delete-btn" onclick="deleteDoc({{ doc.id }})" title="Удалить">
@@ -193,9 +198,9 @@ document.getElementById('uploadForm').addEventListener('submit', async function(
     btn.textContent = 'Загрузить';
 });
 
-// Обработка документа
+// Обработка документа + polling статуса async
 async function processDoc(id) {
-    const btn = document.querySelector('button[data-id="' + id + '"]');
+    const btn = document.getElementById('btn-' + id);
     if (!btn) return;
 
     const row = document.getElementById('row-' + id);
@@ -203,6 +208,8 @@ async function processDoc(id) {
 
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner"></span> Обработка...';
+    statusCell.className = 'status status-processing';
+    statusCell.textContent = 'Обрабатывается';
 
     try {
         const response = await fetch('/process/' + id + '/', {
@@ -211,23 +218,84 @@ async function processDoc(id) {
         });
         const data = await response.json();
 
-        if (response.ok) {
-            statusCell.className = 'status status-done';
-            statusCell.textContent = 'Готово';
-            btn.outerHTML = '<a href="/detail/' + id + '/" class="btn btn-primary">📖 Читать</a>';
-        } else {
+        if (!response.ok) {
+            alert(data.error || 'Ошибка обработки');
             statusCell.className = 'status status-error';
             statusCell.textContent = 'Ошибка';
             btn.disabled = false;
-            btn.textContent = '🔍 Обработать';
-            alert(data.error || 'Ошибка обработки');
+            btn.textContent = 'Повторить';
+            return;
         }
+
+        // Запускаем polling
+        pollStatus(id);
+
     } catch (err) {
         btn.disabled = false;
-        btn.textContent = '🔍 Обработать';
+        btn.textContent = 'Повторить';
         alert(err.message);
     }
 }
+
+// Polling статуса документа
+async function pollStatus(id) {
+    const interval = 3000; // 3 сек
+    let attempts = 0;
+    const maxAttempts = 200; // ~10 минут
+
+    const timer = setInterval(async () => {
+        attempts++;
+        if (attempts > maxAttempts) {
+            clearInterval(timer);
+            return;
+        }
+
+        try {
+            const resp = await fetch('/status/' + id + '/');
+            const data = await resp.json();
+
+            if (!resp.ok) return;
+
+            const row = document.getElementById('row-' + id);
+            if (!row) { clearInterval(timer); return; }
+
+            const statusCell = row.querySelector('.status');
+            const btnCell = row.querySelector('.actions');
+
+            if (data.status === 'done') {
+                clearInterval(timer);
+                statusCell.className = 'status status-done';
+                statusCell.textContent = 'Готово';
+                btnCell.innerHTML = `
+                    <a href="/detail/${id}/" class="btn btn-primary">📖 Читать</a>
+                    <button class="delete-btn" onclick="deleteDoc(${id})" title="Удалить">🗑</button>
+                `;
+            } else if (data.status === 'error') {
+                clearInterval(timer);
+                statusCell.className = 'status status-error';
+                statusCell.textContent = 'Ошибка';
+                const btn = document.getElementById('btn-' + id);
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = 'Повторить';
+                }
+            }
+        } catch (e) {
+            // ignore network errors during polling
+        }
+    }, interval);
+}
+
+// Автоматический polling для документов already processing при загрузке страницы
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.status-processing').forEach(function(el) {
+        const row = el.closest('.doc-row');
+        if (row) {
+            const id = row.id.replace('row-', '');
+            pollStatus(parseInt(id));
+        }
+    });
+});
 
 // Удаление документа
 async function deleteDoc(id) {

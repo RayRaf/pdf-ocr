@@ -1,71 +1,78 @@
 # PDF OCR
 
-Django веб-приложение для извлечения текста из PDF-файлов с помощью OCR (PyMuPDF + Tesseract).
+Django приложение для извлечения текста из PDF с помощью OCR (PyMuPDF + Tesseract).
+Теперь с **фоновой асинхронной обработкой** через Celery + Redis.
 
-## Функции
+## Stack
 
-- Загрузка PDF-файлов через веб-интерфейс
-- Автоматическое извлечение текста с помощью OCR
-- Просмотр результатов и скачивание извлечённого текста
-- История обработанных документов
+- **Django 5.2** + Gunicorn (production)
+- **Celery** — фоновая обработка OCR
+- **Redis** — брокер Celery
+- **Tesseract OCR** + Pillow — распознавание текста
+- **Traefik** — реверс-прокси в production (автообнаружение через labels)
+- **Docker Compose** — оркестрация
 
-## Технологии
+## Структура docker-compose
 
-- **Django** — веб-фреймворк
-- **PyMuPDF (fitz)** — работа с PDF
-- **Tesseract OCR** + **Pillow** — распознавание текста
-- **SQLite** — база данных (для разработки)
+| файл | назначение |
+|------|-----------|
+| `docker-compose.yml` | Production конфиг: без exposed портов, Traefik labels, env vars |
+| `docker-compose.override.yml` | Local dev: порты `8000`, volume `.`, `.env` напрямую |
+| `Dockerfile` | Multi-ready образ с `entrypoint.sh` (миграции + static) |
 
-## Установка
+## Запуск локально
 
 ```bash
-# 1. Клонировать репозиторий
-git clone https://github.com/RayRaf/pdf-ocr.git
-cd pdf-ocr
-
-# 2. Установить зависимости
-pip install -r requirements.txt
-
-# 3. Установить системные зависимости (Tesseract)
-# Ubuntu/Debian:
-sudo apt-get install tesseract-ocr poppler-utils
-
-# macOS:
-brew install tesseract
-
-# 4. Настроить переменные окружения
 cp .env.example .env
-# Отредактируй .env — укажи свой SECRET_KEY
+# отредактируй .env — укажи SECRET_KEY и т.д.
 
-# 5. Применить миграции и запустить
-python manage.py migrate
-python manage.py runserver
+docker compose up --build
 ```
 
-## Настройка
+- Web: http://localhost:8000
+- Celery worker: `docker compose logs -f worker`
 
-Создай файл `.env` рядом с `.env.example`:
+## Запуск в production (Dokploy)
+
+1. В настройках Dokploy задай Environment Variables:
+   ```
+   SECRET_KEY=your-secret-here
+   ALLOWED_HOSTS=your-domain.com
+   CSRF_TRUSTED_ORIGINS=https://your-domain.com
+   PDF_OCR_HOST=your-domain.com
+   ```
+2. Загрузи `docker-compose.yml` (без `.override`)
+3. Dokploy сам поднимет Traefik и проксит трафик через `traefik.enable=true`
+
+## Endpoints
+
+| URL | Метод | Описание |
+|-----|-------|----------|
+| `/` | GET | Главная — список документов |
+| `/upload/` | POST | Загрузка PDF |
+| `/process/<id>/` | POST | Запуск OCR (async → Celery) |
+| `/status/<id>/` | GET | Проверка статуса обработки |
+| `/detail/<id>/` | GET | Просмотр распознанного текста |
+| `/delete/<id>/` | POST | Удаление документа + файла |
+
+## Environment Variables
 
 ```
-DEBUG=True
-SECRET_KEY=your-secret-key-here
-ALLOWED_HOSTS=localhost,127.0.0.1
+DEBUG=False
+SECRET_KEY=change-me
+ALLOWED_HOSTS=your-domain.com,localhost
+CSRF_TRUSTED_ORIGINS=https://your-domain.com
+USE_X_FORWARDED_HOST=True
+REDIS_URL=redis://redis:6379/0
+PDF_OCR_HOST=your-domain.com
 ```
 
-## Использование
+## Примечания
 
-1. Открой `http://127.0.0.1:8000/`
-2. Загрузи PDF через форму
-3. Дождись обработки
-4. Просматривай и скачивай результат
+- Для деплоя через **Dokploy** убедись, что `.env` не попадает в git
+- Traefik подхватывает сервис по `traefik.http.routers...` labels
+- Внутри Docker веб-сервер смотрит на порт `8000` (`expose: ["8000"]`), порт наружу не выставлен в production
 
-## Структура проекта
+---
 
-- `pdf_ocr_project/` — настройки Django
-- `ocr/` — приложение: модели,视图, обработка PDF
-- `templates/` — HTML-шаблоны
-- `media/` — загруженные файлы
-
-## Автор
-
-[RayRaf](https://github.com/RayRaf)
+Автор: [RayRaf](https://github.com/RayRaf)

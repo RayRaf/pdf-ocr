@@ -1,0 +1,66 @@
+version: "3.9"
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pdf_ocr_web
+    expose:
+      - "8000"
+    environment:
+      - DEBUG=${DEBUG:-False}
+      - SECRET_KEY=${SECRET_KEY}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
+      - CSRF_TRUSTED_ORIGINS=${CSRF_TRUSTED_ORIGINS}
+      - USE_X_FORWARDED_HOST=${USE_X_FORWARDED_HOST:-True}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+    depends_on:
+      - redis
+    volumes:
+      - media_data:/app/media
+      - db_data:/app/db_data
+    labels:
+      # Traefik labels для автоматического обнаружения Dokploy
+      - "traefik.enable=true"
+      - "traefik.http.routers.pdf-ocr.rule=Host(`${PDF_OCR_HOST:-pdf-ocr.localhost}`)"
+      - "traefik.http.routers.pdf-ocr.entrypoints=web"
+      - "traefik.http.services.pdf-ocr.loadbalancer.server.port=8000"
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pdf_ocr_worker
+    command: ["celery", "-A", "pdf_ocr_project", "worker", "-l", "info", "-c", "2"]
+    environment:
+      - DEBUG=${DEBUG:-False}
+      - SECRET_KEY=${SECRET_KEY}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
+      - CSRF_TRUSTED_ORIGINS=${CSRF_TRUSTED_ORIGINS}
+      - USE_X_FORWARDED_HOST=${USE_X_FORWARDED_HOST:-True}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+    depends_on:
+      - redis
+    volumes:
+      - media_data:/app/media
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: pdf_ocr_redis
+    restart: unless-stopped
+
+networks:
+  # Для локальной разработки bridge-сеть работает из коробки.
+  # При деплое через Dokploy Traefik обычно подключается автоматически;
+  # если требуется ручная сеть, замените на:
+  #   traefik-public:
+  #     external: true
+  app_network:
+    driver: bridge
+
+volumes:
+  media_data:
+  db_data:
