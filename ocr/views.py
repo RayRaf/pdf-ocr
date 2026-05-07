@@ -4,7 +4,7 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.conf import settings
 
-from .models import Document
+from .models import Document, DocumentPage
 from .tasks import process_document
 
 
@@ -21,6 +21,10 @@ def upload(request):
 
     if not file.name.lower().endswith(".pdf"):
         return JsonResponse({"error": "Только PDF файлы"}, status=400)
+
+    # Лимит 50MB
+    if file.size > 50 * 1024 * 1024:
+        return JsonResponse({"error": "Файл слишком большой (макс 50MB)"}, status=400)
 
     doc = Document.objects.create(
         title=file.name,
@@ -46,6 +50,9 @@ def process(request, pk):
     doc.status = Document.Status.PROCESSING
     doc.save(update_fields=["status"])
 
+    # Очистка старых страниц при повторной обработке
+    DocumentPage.objects.filter(document=doc).delete()
+
     process_document.delay(doc.id)
 
     return JsonResponse({
@@ -61,6 +68,8 @@ def status(request, pk):
         "id": doc.id,
         "status": doc.status,
         "status_display": doc.get_status_display(),
+        "page_count": doc.page_count,
+        "avg_confidence": doc.avg_confidence,
         "extracted_text_preview": doc.extracted_text[:300] if doc.extracted_text else "",
         "error_message": doc.error_message,
     })
@@ -85,4 +94,35 @@ def delete(request, pk):
 
 def detail(request, pk):
     doc = get_object_or_404(Document, pk=pk)
-    return render(request, "ocr/detail.html", {"doc": doc})
+    pages = doc.pages.select_related().all()
+    return render(request, "ocr/detail.html", {"doc": doc, "pages": pages})
+
+
+def result_json(request, pk):
+    """Возвращает структурированные данные OCR по страницам (JSON)."""
+    doc = get_object_or_404(Document, pk=pk)
+    pages = doc.pages.all()
+    data = {
+        "id": doc.id,
+        "title": doc.title,
+        "status": doc.status,
+        "status_display": doc.get_status_display(),
+        "page_count": doc.page_count,
+        "avg_confidence": doc.avg_confidence,
+        "created_at": doc.created_at.isoformat(),
+        "pages": [
+            {
+                "page_number": p.page_number,
+                "width": p.width,
+                "height": p.height,
+                "dpi": p.dpi,
+                "rotation": p.rotation,
+                "avg_confidence": p.avg_confidence,
+                "structured_data": p.structured_data,
+                "native_text_preview": p.native_text[:500] if p.native_text else "",
+                "ocr_text_preview": p.ocr_text[:500] if p.ocr_text else "",
+            }
+            for p in pages
+        ],
+    }
+    return JsonResponse(data)
