@@ -18,9 +18,7 @@ def process_document(self, document_id: int):
     except Document.DoesNotExist:
         return {"error": f"Document {document_id} not found"}
 
-    if doc.status == Document.Status.PROCESSING:
-        return {"error": "Уже обрабатывается"}
-
+    # Статус уже PROCESSING благодаря view — просто работаем
     doc.status = Document.Status.PROCESSING
     doc.save()
 
