@@ -42,7 +42,10 @@ def process(request, pk):
     if doc.status == Document.Status.PROCESSING:
         return JsonResponse({"error": "Уже обрабатывается"}, status=409)
 
-    # Отправляем в Celery worker вместо синхронной обработки
+    # Обновляем статус ДО отправки в Celery, чтобы избежать race condition
+    doc.status = Document.Status.PROCESSING
+    doc.save(update_fields=["status"])
+
     process_document.delay(doc.id)
 
     return JsonResponse({

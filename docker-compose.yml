@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   web:
     build:
@@ -20,6 +18,8 @@ services:
     volumes:
       - media_data:/app/media
       - db_data:/app/db_data
+    networks:
+      - app_network
     labels:
       # Traefik labels для автоматического обнаружения Dokploy
       - "traefik.enable=true"
@@ -45,6 +45,9 @@ services:
       - redis
     volumes:
       - media_data:/app/media
+      - db_data:/app/db_data
+    networks:
+      - app_network
     restart: unless-stopped
 
   redis:

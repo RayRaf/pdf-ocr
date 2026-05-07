@@ -29,5 +29,6 @@ coverage.xml
 staticfiles/
 
 # DB and media — монтируются как volumes в Docker
-# db.sqlite3
-# media/
+db.sqlite3
+media/
+db_data/
